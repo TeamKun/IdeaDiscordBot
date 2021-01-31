@@ -1,7 +1,9 @@
 import re
 import configparser
+from datetime import datetime, timedelta
 
 import discord
+from discord.ext import tasks
 
 
 config = configparser.ConfigParser()
@@ -22,11 +24,16 @@ class BotClient(discord.Client):
         BotClient.idea_channel = BotClient.get_channel(self, idea_channel_id)
         BotClient.good_channel = BotClient.get_channel(self, reaction_channel_id)
         print("アイデアBotが起動しました")
+        BotClient.check_expired_post.start(BotClient)
 
-    async def check_expire_post(self):
-        #while True:
-        #    await client.send_message(channel, 'おはよう')
-        #   await asyncio.sleep(10)
+    @tasks.loop(hours=24)
+    async def check_expired_post(self):
+        today = datetime.now()
+        two_weeks = today - timedelta(weeks=2)
+        messages = []
+        async for message in BotClient.good_channel.history(before=two_weeks):
+            messages.append(message)
+        await BotClient.good_channel.delete_messages(messages)
 
     async def on_message(self, message):
         if message.author.bot:
