@@ -1,5 +1,8 @@
-import discord
+import re
 import configparser
+
+import discord
+
 
 config = configparser.ConfigParser()
 config.read('config.ini', 'UTF-8')
@@ -20,12 +23,39 @@ class BotClient(discord.Client):
         BotClient.good_channel = BotClient.get_channel(self, reaction_channel_id)
         print("アイデアBotが起動しました")
 
+    async def check_expire_post(self):
+        #while True:
+        #    await client.send_message(channel, 'おはよう')
+        #   await asyncio.sleep(10)
+
+    async def on_message(self, message):
+        if message.author.bot:
+            return
+        else:
+            message.author.send('test')
+
     async def on_raw_reaction_add(self, reaction):
         channel_id = reaction.channel_id
         if channel_id == idea_channel_id:
             await BotClient.on_idea_channel(self, reaction)
         elif channel_id == reaction_channel_id:
             await BotClient.on_reaction_channel(self, reaction)
+
+    async def on_idea_channel(self, reaction):
+        emoji = reaction.emoji.name
+        if emoji != good:
+            return
+        message_id = reaction.message_id
+        message = await BotClient.idea_channel.fetch_message(message_id)
+        message_url = message.jump_url
+        embed = discord.Embed(title=message.author.display_name + 'の企画案',
+                              description=message.content,
+                              color=discord.Colour.green())
+        embed.add_field(name='賛同者',
+                        value=reaction.member.display_name + '(' + str(reaction.member) + ')',
+                        inline=False)
+        embed.add_field(name='リンク', value=message_url, inline=True)
+        await BotClient.good_channel.send(embed=embed)
 
     async def on_reaction_channel(self, reaction):
         emoji = reaction.emoji.name
@@ -41,9 +71,9 @@ class BotClient(discord.Client):
         message = await BotClient.good_channel.fetch_message(message_id)
         embed = message.embeds[0]
         supporter = embed.fields[0].value
-        name = reaction.member.display_name + '(' + str(reaction.member) + ')'
         if str(reaction.member) not in supporter:
             embed.remove_field(0)
+            name = reaction.member.display_name + '(' + str(reaction.member) + ')'
             supporter += ', ' + name
             embed.insert_field_at(0, name='賛同者', value=supporter, inline=False)
         await BotClient.good_channel.send(embed=embed)
@@ -53,30 +83,29 @@ class BotClient(discord.Client):
         message_id = reaction.message_id
         message = await BotClient.good_channel.fetch_message(message_id)
         embed = message.embeds[0]
-        await BotClient.good_channel.send(embed=embed)
-        await message.delete()
+        supporter = embed.fields[0].value
+        regex = ',.+\(' + str(reaction.member) + '\)|'\
+                '.+\(' +str(reaction.member) + '\),|' \
+                '~(,).+\(' + str(reaction.member) + '\)'
+        if str(reaction.member) in supporter:
+            embed.remove_field(0)
+            supporter = re.sub(regex, '', supporter)
+            if len(supporter) == 0:
+                await message.delete()
+            else:
+                emoji = reaction.emoji.name
+                embed.insert_field_at(0, name='賛同者', value=supporter, inline=False)
+                await message.edit(embed=embed)
+                await message.remove_reaction(emoji, reaction.member)
 
     async def on_info_reaction(self, reaction):
+        emoji = reaction.emoji.name
+        content = '以下の企画案に補足説明をしますか？'
         message_id = reaction.message_id
         message = await BotClient.good_channel.fetch_message(message_id)
-
-    async def on_idea_channel(self, reaction):
-        emoji = reaction.emoji.name
-        if emoji != good:
-            return
-        message_id = reaction.message_id
-        message = await BotClient.idea_channel.fetch_message(message_id)
-        message_url = message.jump_url
-        print(message.content)
-        print(message.attachments)
-        embed = discord.Embed(title=message.author.display_name + 'の企画案',
-                              description=message.content,
-                              color=discord.Colour.green())
-        embed.add_field(name='賛同者',
-                        value=reaction.member.display_name + '(' + str(reaction.member) + ')',
-                        inline=False)
-        embed.add_field(name='リンク', value=message_url, inline=True)
-        await BotClient.good_channel.send(embed=embed)
+        embed = message.embeds[0]
+        await message.remove_reaction(emoji, reaction.member)
+        await reaction.member.send(embed=embed)
 
 
 client = BotClient()
