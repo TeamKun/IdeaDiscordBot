@@ -62,7 +62,8 @@ class BotClient(discord.Client):
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
-        embed = discord.Embed(title=message.author.display_name + ' の企画案',
+        member = await message.guild.fetch_member(message.author.id)
+        embed = discord.Embed(title=member.display_name + ' の企画案',
                               description=message.content,
                               color=discord.Colour.green())
         embed.add_field(name='👍 いいね',
