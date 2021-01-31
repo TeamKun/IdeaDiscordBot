@@ -9,6 +9,25 @@ Python 3.9.1
 
 必要ライブラリ\
 discord.py
+# 設定
+config.iniの各パラメータを設定する\
+
+bot_token = ボットToken\
+from_channel_id = いいねをする元のチャンネル\
+to_channel_id = いいねした後に投稿を移動するチャンネル\
+good = いいねリアクション(ユニコードに存在するリアクション。デフォは👍)
+bad = 取り消しリアクション(ユニコードに存在するリアクション。デフォは👎)
+info = 補足リアクション(ユニコードに存在するリアクション。デフォは🧐)
+
+# 必要権限(Discord Bot)
+Text Permissions\
+ - Send messages
+ - Manage Messages
+ - Embed Links
+ - Attach Links
+ - Read Message History
+ - Add Reaction
+
 # 機能
 ・特定チャンネルでいいねリアクションをされた場合、いいねされた投稿をいいねチャンネルにコピーして投稿する\
 ・いいねチャンネルでいいねされた場合、賛同者の名前を記載していいねチャンネルの一番下に持ってくる\
