@@ -1,6 +1,9 @@
 # IdeaDiscordBot
 アイデア整理用Discord Bot
-
+# 実行に必要なファイル
+bot_main.py\
+config.ini
+# Pythonのバージョンと必要ライブラリ
 Pythonバージョン\
 Python 3.9.1
 
