@@ -62,13 +62,13 @@ class BotClient(discord.Client):
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
-        embed = discord.Embed(title=message.author.display_name + 'の企画案',
+        embed = discord.Embed(title=message.author.display_name + ' の企画案',
                               description=message.content,
                               color=discord.Colour.green())
-        embed.add_field(name='👍いいね',
+        embed.add_field(name='👍 いいね',
                         value='<@' + str(reaction.member.id) + '>',
                         inline=False)
-        embed.add_field(name='💡元ネタ',
+        embed.add_field(name='💡 元ネタ',
                         value='<@' + str(message.author.id) + '> [' + date + ' の企画](' + message_url + ')より',
                         inline=False)
         if use_third_channel:
@@ -98,7 +98,7 @@ class BotClient(discord.Client):
         if str(reaction.member.id) not in supporter:
             embed.remove_field(supporter_field_pos)
             supporter += '<@' + str(reaction.member.id) + '>'
-            embed.insert_field_at(supporter_field_pos, name='👍いいね', value=supporter, inline=False)
+            embed.insert_field_at(supporter_field_pos, name='👍 いいね', value=supporter, inline=False)
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
@@ -126,10 +126,10 @@ class BotClient(discord.Client):
             bad_embed = discord.Embed(title=title,
                                       description=embed.description,
                                       color=discord.Colour.red())
-            bad_embed.add_field(name='👍いいね',
+            bad_embed.add_field(name='👍 いいね',
                                 value=embed.fields[supporter_field_pos].value,
                                 inline=False)
-            bad_embed.add_field(name='💡元ネタ',
+            bad_embed.add_field(name='💡 元ネタ',
                                 value=embed.fields[supporter_field_pos + 1].value,
                                 inline=False)
             await message.delete()
@@ -143,7 +143,7 @@ class BotClient(discord.Client):
                 await message.delete()
             else:
                 emoji = reaction.emoji.name
-                embed.insert_field_at(supporter_field_pos, name='👍いいね', value=supporter, inline=False)
+                embed.insert_field_at(supporter_field_pos, name='👍 いいね', value=supporter, inline=False)
                 await message.edit(embed=embed)
                 await message.remove_reaction(emoji, reaction.member)
         else:
@@ -179,7 +179,7 @@ class BotClient(discord.Client):
         except asyncio.TimeoutError:
             content = '時間切れです😢'
         else:
-            embed.insert_field_at(0, name='✏補足', value=exp, inline=False)
+            embed.insert_field_at(0, name='✏ 補足', value=exp, inline=False)
             for attachment in attachments:
                 new_attachment_files.append(await attachment.to_file())
             content = '企画案の補足を追記しました👍'
