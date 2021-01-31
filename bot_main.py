@@ -1,5 +1,5 @@
 import asyncio
-import re
+import os
 import configparser
 from datetime import datetime, timedelta
 
@@ -9,9 +9,12 @@ from discord.ext import tasks
 
 config = configparser.ConfigParser()
 config.read('config.ini', 'UTF-8')
-token = config.get('discord', 'bot_token')
+token = os.environ.get('DISCORD_TOKEN') or config.get('discord', 'bot_token')
 idea_channel_id = config.getint('discord', 'from_channel_id')
 reaction_channel_id = config.getint('discord', 'to_channel_id')
+third_channel_id = config.getint('discord', 'third_channel_id')
+use_third_channel = config.getboolean('discord', 'third_channel')
+super_user_ids = config.get('discord', 'super_user')
 good = config.get('discord', 'good')
 bad = config.get('discord', 'bad')
 info = config.get('discord', 'info')
@@ -20,10 +23,13 @@ info = config.get('discord', 'info')
 class BotClient(discord.Client):
     idea_channel = ''
     good_channel = ''
+    third_channel = ''
+    super_users = super_user_ids.replace(' ', '').split(',')
 
     async def on_ready(self):
         BotClient.idea_channel = BotClient.get_channel(self, idea_channel_id)
         BotClient.good_channel = BotClient.get_channel(self, reaction_channel_id)
+        BotClient.third_channel = BotClient.get_channel(self, third_channel_id)
         print("Botが起動しました")
         BotClient.check_expired_post.start(BotClient)
 
@@ -52,20 +58,27 @@ class BotClient(discord.Client):
         message_id = reaction.message_id
         message = await BotClient.idea_channel.fetch_message(message_id)
         message_url = message.jump_url
+        date = message.created_at.strftime('%Y/%m/%d')
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
         embed = discord.Embed(title=message.author.display_name + 'の企画案',
                               description=message.content,
                               color=discord.Colour.green())
-        embed.add_field(name='賛同者',
-                        value=reaction.member.display_name + '(' + str(reaction.member) + ')',
+        embed.add_field(name='👍いいね',
+                        value='<@' + str(reaction.member.id) + '>',
                         inline=False)
-        embed.add_field(name='リンク', value=message_url, inline=True)
+        embed.add_field(name='💡元ネタ',
+                        value='<@' + str(message.author.id) + '> [' + date + ' の企画](' + message_url + ')より',
+                        inline=False)
+        if use_third_channel:
+            if str(reaction.member.id) in BotClient.super_users:
+                await BotClient.third_channel.send(embed=embed, files=attachment_files)
+                return
         sent_message = await BotClient.good_channel.send(embed=embed, files=attachment_files)
-        await sent_message.add_reaction('👍')
-        await sent_message.add_reaction('👎')
-        await sent_message.add_reaction('🧐')
+        await sent_message.add_reaction(good)
+        await sent_message.add_reaction(bad)
+        await sent_message.add_reaction(info)
 
     async def on_reaction_channel(self, reaction):
         emoji = reaction.emoji.name
@@ -82,18 +95,22 @@ class BotClient(discord.Client):
         embed = message.embeds[0]
         supporter_field_pos = len(embed.fields) - 2
         supporter = embed.fields[supporter_field_pos].value
-        if str(reaction.member) not in supporter:
+        if str(reaction.member.id) not in supporter:
             embed.remove_field(supporter_field_pos)
-            name = reaction.member.display_name + '(' + str(reaction.member) + ')'
-            supporter += ', ' + name
-            embed.insert_field_at(supporter_field_pos, name='賛同者', value=supporter, inline=False)
+            supporter += '<@' + str(reaction.member.id) + '>'
+            embed.insert_field_at(supporter_field_pos, name='👍いいね', value=supporter, inline=False)
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
+        if use_third_channel:
+            if str(reaction.member.id) in BotClient.super_users:
+                await BotClient.third_channel.send(embed=embed, files=attachment_files)
+                await message.delete()
+                return
         sent_message = await BotClient.good_channel.send(embed=embed, files=attachment_files)
-        await sent_message.add_reaction('👍')
-        await sent_message.add_reaction('👎')
-        await sent_message.add_reaction('🧐')
+        await sent_message.add_reaction(good)
+        await sent_message.add_reaction(bad)
+        await sent_message.add_reaction(info)
         await message.delete()
 
     async def on_bad_reaction(self, reaction):
@@ -102,18 +119,31 @@ class BotClient(discord.Client):
         message = await BotClient.good_channel.fetch_message(message_id)
         embed = message.embeds[0]
         supporter_field_pos = len(embed.fields) - 2
+        if len(BotClient.super_users) != 0 and str(reaction.member.id) in BotClient.super_users:
+            content = '<@' + str(reaction.member.id) + '>によって没になりました'
+            await message.remove_reaction(emoji, reaction.member)
+            title = '~~' + embed.title + '~~'
+            bad_embed = discord.Embed(title=title,
+                                      description=embed.description,
+                                      color=discord.Colour.red())
+            bad_embed.add_field(name='👍いいね',
+                                value=embed.fields[supporter_field_pos].value,
+                                inline=False)
+            bad_embed.add_field(name='💡元ネタ',
+                                value=embed.fields[supporter_field_pos + 1].value,
+                                inline=False)
+            await message.delete()
+            await BotClient.good_channel.send(content=content, embed=bad_embed)
+            return
         supporter = embed.fields[supporter_field_pos].value
-        regex = ',.+\(' + str(reaction.member) + '\)|'\
-                '.+\(' +str(reaction.member) + '\),|' \
-                '^(?!.*,).+\(' + str(reaction.member) + '\)'
-        if str(reaction.member) in supporter:
+        if str(reaction.member.id) in supporter:
             embed.remove_field(supporter_field_pos)
-            supporter = re.sub(regex, '', supporter)
+            supporter = supporter.replace('<@' + str(reaction.member.id) + '>', '')
             if len(supporter) == 0:
                 await message.delete()
             else:
                 emoji = reaction.emoji.name
-                embed.insert_field_at(supporter_field_pos, name='賛同者', value=supporter, inline=False)
+                embed.insert_field_at(supporter_field_pos, name='👍いいね', value=supporter, inline=False)
                 await message.edit(embed=embed)
                 await message.remove_reaction(emoji, reaction.member)
         else:
@@ -129,7 +159,6 @@ class BotClient(discord.Client):
         attachments = []
         message_id = reaction.message_id
         message = await BotClient.good_channel.fetch_message(message_id)
-        name = reaction.member.display_name + '(' + str(reaction.member) + ')'
         await message.remove_reaction(emoji, reaction.member)
         for attachment in message.attachments:
             attachments.append(attachment)
@@ -139,8 +168,8 @@ class BotClient(discord.Client):
 
         def add_explanation(msg):
             if not msg.author.bot and msg.author.id == reaction.member.id:
-                nonlocal name, exp, attachments
-                exp = msg.content + ' / ' + name
+                nonlocal exp, attachments
+                exp = msg.content + ' by <@' + str(reaction.member.id) + '>'
                 for attach in msg.attachments:
                     attachments.append(attach)
                 return True
@@ -150,14 +179,14 @@ class BotClient(discord.Client):
         except asyncio.TimeoutError:
             content = '時間切れです😢'
         else:
-            embed.insert_field_at(0, name='企画案の補足', value=exp, inline=False)
+            embed.insert_field_at(0, name='✏補足', value=exp, inline=False)
             for attachment in attachments:
                 new_attachment_files.append(await attachment.to_file())
             content = '企画案の補足を追記しました👍'
             sent_message = await BotClient.good_channel.send(embed=embed, files=new_attachment_files)
-            await sent_message.add_reaction('👍')
-            await sent_message.add_reaction('👎')
-            await sent_message.add_reaction('🧐')
+            await sent_message.add_reaction(good)
+            await sent_message.add_reaction(bad)
+            await sent_message.add_reaction(info)
             await message.delete()
         await reaction.member.send(content=content)
 
