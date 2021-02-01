@@ -168,7 +168,7 @@ class BotClient(discord.Client):
         await reaction.member.send(content=content, embed=embed, files=old_attachment_files)
 
         def add_explanation(msg):
-            if not msg.author.bot and msg.author.id == reaction.member.id:
+            if not msg.author.bot and msg.channel.type == discord.ChannelType.private and msg.author.id == reaction.member.id:
                 nonlocal exp, attachments
                 exp = msg.content + ' by <@' + str(reaction.member.id) + '>'
                 for attach in msg.attachments:
