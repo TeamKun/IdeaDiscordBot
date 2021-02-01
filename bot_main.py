@@ -33,24 +33,25 @@ class BotClient(discord.Client):
         print("Botが起動しました")
         BotClient.check_expired_post.start(BotClient)
 
+    # 2週間経過したメッセージを消去する（1日ごとに実行）
     @tasks.loop(hours=24)
     async def check_expired_post(self):
         today = datetime.now()
         two_weeks = today - timedelta(weeks=2)
-        messages = []
         async for message in BotClient.good_channel.history(before=two_weeks):
-            messages.append(message)
-        await BotClient.good_channel.delete_messages(messages)
+            await message.delete()
 
+    # リアクションされたとき
     async def on_raw_reaction_add(self, reaction):
         channel_id = reaction.channel_id
-        if reaction.member.bot:
+        if reaction.member is None or reaction.member.bot:
             return
         if channel_id == idea_channel_id:
             await BotClient.on_idea_channel(self, reaction)
         elif channel_id == reaction_channel_id:
             await BotClient.on_reaction_channel(self, reaction)
 
+    # アイデアチャンネルでいいねが押された時の処理
     async def on_idea_channel(self, reaction):
         emoji = reaction.emoji.name
         if emoji != good:
@@ -58,6 +59,14 @@ class BotClient(discord.Client):
         message_id = reaction.message_id
         message = await BotClient.idea_channel.fetch_message(message_id)
         message_url = message.jump_url
+
+        async for msg in BotClient.good_channel.history():
+            embed = msg.embeds[0]
+            supporter_field_pos = len(embed.fields) - 1
+            if message_url in embed.fields[supporter_field_pos].value:
+                await BotClient.send_good(self, msg.id, reaction.member)
+                return
+
         date = message.created_at.strftime('%Y/%m/%d')
         attachment_files = []
         for attachment in message.attachments:
@@ -81,6 +90,7 @@ class BotClient(discord.Client):
         await sent_message.add_reaction(bad)
         await sent_message.add_reaction(info)
 
+    # チャンネルでリアクションが押された時の処理
     async def on_reaction_channel(self, reaction):
         emoji = reaction.emoji.name
         if emoji == good:
@@ -90,70 +100,121 @@ class BotClient(discord.Client):
         elif emoji == info:
             await BotClient.on_info_reaction(self, reaction)
 
-    async def on_good_reaction(self, reaction):
-        message_id = reaction.message_id
+    async def send_good(self, message_id, member):
         message = await BotClient.good_channel.fetch_message(message_id)
+        member_id = str(member.id)
+        is_newest = False
         embed = message.embeds[0]
-        supporter_field_pos = len(embed.fields) - 2
-        supporter = embed.fields[supporter_field_pos].value
-        if str(reaction.member.id) not in supporter:
-            embed.remove_field(supporter_field_pos)
-            supporter += '<@' + str(reaction.member.id) + '>'
-            embed.insert_field_at(supporter_field_pos, name='👍 いいね', value=supporter, inline=False)
+        link_pos = len(embed.fields) - 1
+        pos_fix = 1
+        if 'だめだね' in embed.fields[link_pos - 1].name:
+            pos_fix = 2
+        supporter_pos = link_pos - pos_fix
+        supporter = embed.fields[supporter_pos].value
+        if member_id not in supporter:
+            embed.remove_field(supporter_pos)
+            supporter += '<@' + member_id + '>'
+            embed.insert_field_at(supporter_pos,
+                                  name='👍 いいね',
+                                  value=supporter,
+                                  inline=False)
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
         if use_third_channel:
-            if str(reaction.member.id) in BotClient.super_users:
+            if member_id in BotClient.super_users:
                 await BotClient.third_channel.send(embed=embed, files=attachment_files)
                 await message.delete()
                 return
-        sent_message = await BotClient.good_channel.send(embed=embed, files=attachment_files)
-        await sent_message.add_reaction(good)
-        await sent_message.add_reaction(bad)
-        await sent_message.add_reaction(info)
-        await message.delete()
+        # 最新の投稿チェック
+        async for msg in BotClient.good_channel.history(limit=1, oldest_first=False):
+            if msg.id == message_id:
+                is_newest = True
+        if is_newest:
+            await message.edit(embed=embed)
+            await message.remove_reaction(good, member)
+        else:
+            sent_message = await BotClient.good_channel.send(embed=embed, files=attachment_files)
+            await sent_message.add_reaction(good)
+            await sent_message.add_reaction(bad)
+            await sent_message.add_reaction(info)
+            await message.delete()
 
+    # いいねのリアクションがいいねチャンネルでされたとき
+    async def on_good_reaction(self, reaction):
+        message_id = reaction.message_id
+        await BotClient.send_good(self, message_id, reaction.member)
+
+    # バッドリアクションがいいねチャンネルでされたとき
     async def on_bad_reaction(self, reaction):
         emoji = reaction.emoji.name
+        member_id = str(reaction.member.id)
         message_id = reaction.message_id
         message = await BotClient.good_channel.fetch_message(message_id)
         embed = message.embeds[0]
-        supporter_field_pos = len(embed.fields) - 2
-        if len(BotClient.super_users) != 0 and str(reaction.member.id) in BotClient.super_users:
+        link_pos = len(embed.fields) - 1
+        pos_fix = 1
+        damedane = ''
+        if 'だめだね' in embed.fields[link_pos - 1].name:
+            pos_fix = 2
+            damedane = embed.fields[link_pos - 1].value
+        supporter_pos = link_pos - pos_fix
+
+        # スーパーユーザーの処理
+        if len(BotClient.super_users) != 0 and member_id in BotClient.super_users:
             content = '<@' + str(reaction.member.id) + '>によって没になりました'
             await message.remove_reaction(emoji, reaction.member)
             title = '~~' + embed.title + '~~'
             bad_embed = discord.Embed(title=title,
                                       description=embed.description,
                                       color=discord.Colour.red())
-            bad_embed.add_field(name='👍 いいね',
-                                value=embed.fields[supporter_field_pos].value,
+            bad_embed.add_field(name=embed.fields[supporter_pos].name,
+                                value=embed.fields[supporter_pos].value,
                                 inline=False)
-            bad_embed.add_field(name='💡 元ネタ',
-                                value=embed.fields[supporter_field_pos + 1].value,
+            if 'だめだね' in embed.fields[link_pos].name:
+                bad_embed.add_field(name=embed.fields[link_pos].name,
+                                    value=embed.fields[link_pos].value,
+                                    inline=False)
+            bad_embed.add_field(name=embed.fields[link_pos].name,
+                                value=embed.fields[link_pos].value,
                                 inline=False)
             await message.delete()
             await BotClient.good_channel.send(content=content, embed=bad_embed)
             return
-        supporter = embed.fields[supporter_field_pos].value
-        if str(reaction.member.id) in supporter:
-            embed.remove_field(supporter_field_pos)
-            supporter = supporter.replace('<@' + str(reaction.member.id) + '>', '')
+
+        supporter = embed.fields[supporter_pos].value
+        if member_id in supporter:
+            embed.remove_field(supporter_pos)
+            supporter = supporter.replace('<@' + member_id + '>', '')
             if len(supporter) == 0:
                 await message.delete()
             else:
                 emoji = reaction.emoji.name
-                embed.insert_field_at(supporter_field_pos, name='👍 いいね', value=supporter, inline=False)
+                embed.insert_field_at(supporter_pos,
+                                      name=embed.fields[supporter_pos - 1].name,
+                                      value=supporter,
+                                      inline=False)
                 await message.edit(embed=embed)
                 await message.remove_reaction(emoji, reaction.member)
         else:
+            damedane += '<@' + member_id + '>'
+            embed.insert_field_at(link_pos,
+                                  name='👎 だめだね～',
+                                  value=damedane,
+                                  inline=False)
+            await message.edit(embed=embed)
             await message.remove_reaction(emoji, reaction.member)
 
+    # 補足追加処理
     async def on_info_reaction(self, reaction):
-        wait_time = 1.0 * 60.0 * 60.0
+        reaction_wait_time = 1.0 * 60.0 * 3
+        explanation_wait_time = 1.0 * 60.0 * 10
         emoji = reaction.emoji.name
-        content = '以下の企画案に補足説明をしますか？\n補足説明を追加する場合は1時間以内に補足の内容を返信してください'
+        content1 = '以下の企画案に補足説明をしますか？\n' \
+                   '補足説明を追加する場合は3分以内に' + good + 'のリアクションをしてください。\n' \
+                   '補足を中止したい場合は' + bad + 'のリアクションをすると中止されます。'
+        content2 = '企画案の補足説明を10分以内に記載して送信してください(画像も添付できます)\n' \
+                   '補足を中止したい場合は「' + bad + '」の絵文字を送信すると中止されます。'
         exp = ''
         old_attachment_files = []
         new_attachment_files = []
@@ -165,10 +226,17 @@ class BotClient(discord.Client):
             attachments.append(attachment)
             old_attachment_files.append(await attachment.to_file())
         embed = message.embeds[0]
-        await reaction.member.send(content=content, embed=embed, files=old_attachment_files)
+        dm = await reaction.member.send(content=content2, embed=embed, files=old_attachment_files)
+        await dm.add_reaction(good)
+        await dm.add_reaction(bad)
 
+        # 補足追加時のメッセージ待ち処理
         def add_explanation(msg):
-            if not msg.author.bot and msg.channel.type == discord.ChannelType.private and msg.author.id == reaction.member.id:
+            if not msg.author.bot \
+                    and msg.channel.type == discord.ChannelType.private \
+                    and msg.author.id == reaction.member.id:
+                if msg.content == bad:
+                    return asyncio.TimeoutError
                 nonlocal exp, attachments
                 exp = msg.content + ' by <@' + str(reaction.member.id) + '>'
                 for attach in msg.attachments:
@@ -176,9 +244,11 @@ class BotClient(discord.Client):
                 return True
 
         try:
-            await self.wait_for('message', timeout=wait_time, check=add_explanation)
+            await self.wait_for('raw_reaction_add', timeout=reaction_wait_time, check=check_explanation)
+            await dm.delete()
+            await self.wait_for('message', timeout=explanation_wait_time, check=add_explanation)
         except asyncio.TimeoutError:
-            content = '時間切れです😢'
+            content = 'メッセージの補足をキャンセルしました'
         else:
             embed.insert_field_at(0, name='✏ 補足', value=exp, inline=False)
             for attachment in attachments:
@@ -189,6 +259,7 @@ class BotClient(discord.Client):
             await sent_message.add_reaction(bad)
             await sent_message.add_reaction(info)
             await message.delete()
+        await dm.delete()
         await reaction.member.send(content=content)
 
 
