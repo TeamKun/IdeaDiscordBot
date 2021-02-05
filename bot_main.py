@@ -12,9 +12,9 @@ config.read('config.ini', 'UTF-8')
 token = os.environ.get('DISCORD_TOKEN') or config.get('discord', 'bot_token')
 idea_channel_id = config.getint('discord', 'from_channel_id')
 reaction_channel_id = config.getint('discord', 'to_channel_id')
-third_channel_id = config.getint('discord', 'third_channel_id')
-use_third_channel = config.getboolean('discord', 'third_channel')
-super_user_ids = config.get('discord', 'super_user')
+super_to_channel_id = config.getint('discord', 'super_to_channel_id')
+super_from_channels_id = config.get('discord', 'super_to_channel_id').replace(' ', '').split(',')
+super_users_id = config.get('discord', 'super_users_id').replace(' ', '').split(',')
 good = config.get('discord', 'good')
 bad = config.get('discord', 'bad')
 info = config.get('discord', 'info')
@@ -23,13 +23,24 @@ info = config.get('discord', 'info')
 class BotClient(discord.Client):
     idea_channel = ''
     good_channel = ''
-    third_channel = ''
-    super_users = super_user_ids.replace(' ', '').split(',')
+    super_from_channels = []
+    super_to_channel = ''
+    use_super = True
 
     async def on_ready(self):
         BotClient.idea_channel = BotClient.get_channel(self, idea_channel_id)
         BotClient.good_channel = BotClient.get_channel(self, reaction_channel_id)
-        BotClient.third_channel = BotClient.get_channel(self, third_channel_id)
+        if not super_from_channels_id[0] == 0:
+            for super_from in super_from_channels_id:
+                BotClient.super_from_channels.append(BotClient.get_channel(self, int(super_from)))
+        else:
+            BotClient.use_super = False
+        if super_users_id[0] == 0:
+            BotClient.use_super = False
+        if not super_to_channel_id == 0:
+            BotClient.super_to_channel = BotClient.get_channel(self, super_to_channel_id)
+        else:
+            BotClient.use_super = False
         print("Botが起動しました")
         BotClient.check_expired_post.start(BotClient)
 
@@ -46,7 +57,11 @@ class BotClient(discord.Client):
         channel_id = reaction.channel_id
         if reaction.member is None or reaction.member.bot:
             return
-        if channel_id == idea_channel_id:
+        if channel_id == idea_channel_id or\
+                (not channel_id == reaction_channel_id and
+                 not channel_id == super_to_channel_id and
+                 str(channel_id) in super_from_channels_id):
+
             await BotClient.on_idea_channel(self, reaction)
         elif channel_id == reaction_channel_id:
             await BotClient.on_reaction_channel(self, reaction)
@@ -81,16 +96,16 @@ class BotClient(discord.Client):
         embed.add_field(name='💡 元ネタ',
                         value='<@' + str(message.author.id) + '> [' + date + ' の企画](' + message_url + ')より',
                         inline=False)
-        if use_third_channel:
-            if str(reaction.member.id) in BotClient.super_users:
-                await BotClient.third_channel.send(embed=embed, files=attachment_files)
+        if BotClient.use_super and str(reaction.member.id) in super_users_id:
+            if idea_channel_id in super_from_channels_id:
+                await BotClient.super_to_channel.send(embed=embed, files=attachment_files)
                 return
         sent_message = await BotClient.good_channel.send(embed=embed, files=attachment_files)
         await sent_message.add_reaction(good)
         await sent_message.add_reaction(bad)
         await sent_message.add_reaction(info)
 
-    # チャンネルでリアクションが押された時の処理
+    # リアクションチャンネルでリアクションが押された時の処理
     async def on_reaction_channel(self, reaction):
         emoji = reaction.emoji.name
         if emoji == good:
@@ -100,38 +115,58 @@ class BotClient(discord.Client):
         elif emoji == info:
             await BotClient.on_info_reaction(self, reaction)
 
+    # いいね時の処理
     async def send_good(self, message_id, member):
         message = await BotClient.good_channel.fetch_message(message_id)
         member_id = str(member.id)
         is_newest = False
+        has_name = False
         embed = message.embeds[0]
         link_pos = len(embed.fields) - 1
         pos_fix = 1
-        if 'だめだね' in embed.fields[link_pos - 1].name:
+        damedane_pos = link_pos - 1
+        damedane = ''
+        damedaname = ''
+        if 'だめだね' in embed.fields[damedane_pos].name:
+            damedane = embed.fields[damedane_pos].value
+            damedaname = embed.fields[damedane_pos].name
             pos_fix = 2
         supporter_pos = link_pos - pos_fix
         supporter = embed.fields[supporter_pos].value
         if member_id not in supporter:
-            embed.remove_field(supporter_pos)
-            supporter += '<@' + member_id + '>'
-            embed.insert_field_at(supporter_pos,
-                                  name='👍 いいね',
-                                  value=supporter,
-                                  inline=False)
+            if member_id in damedane:
+                damedane = damedane.replace('<@' + member_id + '>', '')
+                embed.remove_field(damedane_pos)
+                if len(damedane) != 0:
+                    embed.insert_field_at(damedane_pos,
+                                          name=damedaname,
+                                          value=damedane,
+                                          inline=False)
+            else:
+                embed.remove_field(supporter_pos)
+                supporter += '<@' + member_id + '>'
+                embed.insert_field_at(supporter_pos,
+                                      name='👍 いいね',
+                                      value=supporter,
+                                      inline=False)
+        else:
+            has_name = True
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
-        if use_third_channel:
-            if member_id in BotClient.super_users:
-                await BotClient.third_channel.send(embed=embed, files=attachment_files)
+        if BotClient.use_super:
+            if member_id in super_users_id:
+                await BotClient.super_to_channel.send(embed=embed, files=attachment_files)
                 await message.delete()
                 return
+
         # 最新の投稿チェック
         async for msg in BotClient.good_channel.history(limit=1, oldest_first=False):
             if msg.id == message_id:
                 is_newest = True
         if is_newest:
-            await message.edit(embed=embed)
+            if not has_name:
+                await message.edit(embed=embed)
             await message.remove_reaction(good, member)
         else:
             sent_message = await BotClient.good_channel.send(embed=embed, files=attachment_files)
@@ -154,14 +189,15 @@ class BotClient(discord.Client):
         embed = message.embeds[0]
         link_pos = len(embed.fields) - 1
         pos_fix = 1
+        damedane_pos = link_pos - pos_fix
         damedane = ''
-        if 'だめだね' in embed.fields[link_pos - 1].name:
+        if 'だめだね' in embed.fields[damedane_pos].name:
             pos_fix = 2
-            damedane = embed.fields[link_pos - 1].value
+            damedane = embed.fields[damedane_pos].value
         supporter_pos = link_pos - pos_fix
 
         # スーパーユーザーの処理
-        if len(BotClient.super_users) != 0 and member_id in BotClient.super_users:
+        if BotClient.use_super and member_id in super_users_id:
             content = '<@' + str(reaction.member.id) + '>によって没になりました'
             await message.remove_reaction(emoji, reaction.member)
             title = '~~' + embed.title + '~~'
@@ -184,6 +220,7 @@ class BotClient(discord.Client):
 
         supporter = embed.fields[supporter_pos].value
         if member_id in supporter:
+            field_name = embed.fields[supporter_pos].name
             embed.remove_field(supporter_pos)
             supporter = supporter.replace('<@' + member_id + '>', '')
             if len(supporter) == 0:
@@ -191,18 +228,22 @@ class BotClient(discord.Client):
             else:
                 emoji = reaction.emoji.name
                 embed.insert_field_at(supporter_pos,
-                                      name=embed.fields[supporter_pos - 1].name,
+                                      name=field_name,
                                       value=supporter,
                                       inline=False)
                 await message.edit(embed=embed)
                 await message.remove_reaction(emoji, reaction.member)
         else:
-            damedane += '<@' + member_id + '>'
-            embed.insert_field_at(link_pos,
-                                  name='👎 だめだね～',
-                                  value=damedane,
-                                  inline=False)
-            await message.edit(embed=embed)
+            if len(damedane) != 0:
+                embed.remove_field(damedane_pos)
+                damedane_pos = damedane_pos - 1
+            if member_id not in damedane:
+                damedane += '<@' + member_id + '>'
+                embed.insert_field_at(damedane_pos + 1,
+                                      name='👎 だめだね～',
+                                      value=damedane,
+                                      inline=False)
+                await message.edit(embed=embed)
             await message.remove_reaction(emoji, reaction.member)
 
     # 補足追加処理
