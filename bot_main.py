@@ -262,7 +262,7 @@ class BotClient(discord.Client):
 
     # 補足追加処理
     async def on_info_reaction(self, reaction):
-        explanation_wait_time = 1.0 * 60.0 * 1.0
+        explanation_wait_time = 1.0 * 60.0 * 10.0
         emoji = reaction.emoji.name
         content = '企画案の補足説明を10分以内に記載して送信してください(画像も添付できます)\n' \
                    '補足を中止したい場合は「' + bad + '」のリアクションをすると中止されます。'
