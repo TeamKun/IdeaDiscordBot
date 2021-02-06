@@ -13,7 +13,7 @@ token = os.environ.get('DISCORD_TOKEN') or config.get('discord', 'bot_token')
 idea_channel_id = config.getint('discord', 'from_channel_id')
 reaction_channel_id = config.getint('discord', 'to_channel_id')
 super_to_channel_id = config.getint('discord', 'super_to_channel_id')
-super_from_channels_id = config.get('discord', 'super_to_channel_id').replace(' ', '').split(',')
+super_from_channels_id = config.get('discord', 'super_from_channels_id').replace(' ', '').split(',')
 super_users_id = config.get('discord', 'super_users_id').replace(' ', '').split(',')
 good = config.get('discord', 'good')
 bad = config.get('discord', 'bad')
@@ -21,14 +21,12 @@ info = config.get('discord', 'info')
 
 
 class BotClient(discord.Client):
-    idea_channel = ''
     good_channel = ''
     super_from_channels = []
     super_to_channel = ''
     use_super = True
 
     async def on_ready(self):
-        BotClient.idea_channel = BotClient.get_channel(self, idea_channel_id)
         BotClient.good_channel = BotClient.get_channel(self, reaction_channel_id)
         if not super_from_channels_id[0] == 0:
             for super_from in super_from_channels_id:
@@ -58,21 +56,24 @@ class BotClient(discord.Client):
         if reaction.member is None or reaction.member.bot:
             return
         if channel_id == idea_channel_id or\
-                (not channel_id == reaction_channel_id and
-                 not channel_id == super_to_channel_id and
+                (channel_id != reaction_channel_id and
+                 channel_id != super_to_channel_id and
                  str(channel_id) in super_from_channels_id):
 
-            await BotClient.on_idea_channel(self, reaction)
+            await BotClient.on_from_channel(self, reaction)
         elif channel_id == reaction_channel_id:
             await BotClient.on_reaction_channel(self, reaction)
 
     # アイデアチャンネルでいいねが押された時の処理
-    async def on_idea_channel(self, reaction):
+    async def on_from_channel(self, reaction):
         emoji = reaction.emoji.name
+        channel = BotClient.get_channel(self, reaction.channel_id)
         if emoji != good:
             return
         message_id = reaction.message_id
-        message = await BotClient.idea_channel.fetch_message(message_id)
+        message = await channel.fetch_message(message_id)
+        member = await message.guild.fetch_member(message.author.id)
+        author_id = member.id
         message_url = message.jump_url
 
         async for msg in BotClient.good_channel.history():
@@ -81,12 +82,11 @@ class BotClient(discord.Client):
             if message_url in embed.fields[supporter_field_pos].value:
                 await BotClient.send_good(self, msg.id, reaction.member)
                 return
-
         date = message.created_at.strftime('%Y/%m/%d')
         attachment_files = []
         for attachment in message.attachments:
             attachment_files.append(await attachment.to_file())
-        member = await message.guild.fetch_member(message.author.id)
+
         embed = discord.Embed(title=member.display_name + ' の企画案',
                               description=message.content,
                               color=discord.Colour.green())
@@ -94,10 +94,10 @@ class BotClient(discord.Client):
                         value='<@' + str(reaction.member.id) + '>',
                         inline=False)
         embed.add_field(name='💡 元ネタ',
-                        value='<@' + str(message.author.id) + '> [' + date + ' の企画](' + message_url + ')より',
+                        value='<@' + str(author_id) + '> [' + date + ' の企画](' + message_url + ')より',
                         inline=False)
         if BotClient.use_super and str(reaction.member.id) in super_users_id:
-            if idea_channel_id in super_from_channels_id:
+            if str(reaction.channel_id) in super_from_channels_id:
                 await BotClient.super_to_channel.send(embed=embed, files=attachment_files)
                 return
         sent_message = await BotClient.good_channel.send(embed=embed, files=attachment_files)
