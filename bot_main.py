@@ -24,6 +24,9 @@ class BotClient(discord.Client):
     good_channel = ''
     super_from_channels = []
     super_to_channel = ''
+    on_edit_dm = {}
+    on_edit_message = {}
+    on_edit_member = {}
     use_super = True
 
     async def on_ready(self):
@@ -53,16 +56,27 @@ class BotClient(discord.Client):
     # リアクションされたとき
     async def on_raw_reaction_add(self, reaction):
         channel_id = reaction.channel_id
+        # 補足に対してのキャンセル機能
+        if reaction.user_id in BotClient.on_edit_dm.keys():
+            if reaction.message_id == BotClient.on_edit_dm[reaction.user_id].id and \
+                    reaction.emoji.name == bad:
+                message = BotClient.on_edit_dm[reaction.user_id]
+                await message.delete()
+                member = BotClient.on_edit_member[reaction.user_id]
+                BotClient.on_edit_dm.pop(reaction.user_id)
+                content = '企画案への補足を中止しました'
+                await member.send(content=content)
+                return
         if reaction.member is None or reaction.member.bot:
             return
         if channel_id == idea_channel_id or\
                 (channel_id != reaction_channel_id and
                  channel_id != super_to_channel_id and
                  str(channel_id) in super_from_channels_id):
-
             await BotClient.on_from_channel(self, reaction)
         elif channel_id == reaction_channel_id:
             await BotClient.on_reaction_channel(self, reaction)
+
 
     # アイデアチャンネルでいいねが押された時の処理
     async def on_from_channel(self, reaction):
@@ -248,14 +262,10 @@ class BotClient(discord.Client):
 
     # 補足追加処理
     async def on_info_reaction(self, reaction):
-        reaction_wait_time = 1.0 * 60.0 * 3
-        explanation_wait_time = 1.0 * 60.0 * 10
+        explanation_wait_time = 1.0 * 60.0 * 1.0
         emoji = reaction.emoji.name
-        content1 = '以下の企画案に補足説明をしますか？\n' \
-                   '補足説明を追加する場合は3分以内に' + good + 'のリアクションをしてください。\n' \
-                   '補足を中止したい場合は' + bad + 'のリアクションをすると中止されます。'
-        content2 = '企画案の補足説明を10分以内に記載して送信してください(画像も添付できます)\n' \
-                   '補足を中止したい場合は「' + bad + '」の絵文字を送信すると中止されます。'
+        content = '企画案の補足説明を10分以内に記載して送信してください(画像も添付できます)\n' \
+                   '補足を中止したい場合は「' + bad + '」のリアクションをすると中止されます。'
         exp = ''
         old_attachment_files = []
         new_attachment_files = []
@@ -267,41 +277,65 @@ class BotClient(discord.Client):
             attachments.append(attachment)
             old_attachment_files.append(await attachment.to_file())
         embed = message.embeds[0]
-        dm = await reaction.member.send(content=content2, embed=embed, files=old_attachment_files)
-        await dm.add_reaction(good)
+
+        # DM関連の処理
+        if reaction.member.id in BotClient.on_edit_dm.keys():
+            old_dm = BotClient.on_edit_dm[reaction.member.id]
+            try:
+                await old_dm.delete()
+            except discord.errors.NotFound:
+                pass
+            BotClient.on_edit_dm.pop(reaction.member.id)
+        if reaction.member.id in BotClient.on_edit_message.keys():
+            BotClient.on_edit_message.pop(reaction.member.id)
+        if reaction.member.id in BotClient.on_edit_member.keys():
+            BotClient.on_edit_member.pop(reaction.member.id)
+
+        dm = await reaction.member.send(content=content, embed=embed, files=old_attachment_files)
         await dm.add_reaction(bad)
+
+        # 編集中メッセージとしてdictに追加
+        BotClient.on_edit_dm[reaction.member.id] = dm
+        BotClient.on_edit_message[reaction.member.id] = message
+        BotClient.on_edit_member[reaction.member.id] = reaction.member
 
         # 補足追加時のメッセージ待ち処理
         def add_explanation(msg):
             if not msg.author.bot \
                     and msg.channel.type == discord.ChannelType.private \
                     and msg.author.id == reaction.member.id:
-                if msg.content == bad:
-                    return asyncio.TimeoutError
                 nonlocal exp, attachments
                 exp = msg.content + ' by <@' + str(reaction.member.id) + '>'
                 for attach in msg.attachments:
                     attachments.append(attach)
                 return True
-
         try:
-            await self.wait_for('raw_reaction_add', timeout=reaction_wait_time, check=check_explanation)
-            await dm.delete()
             await self.wait_for('message', timeout=explanation_wait_time, check=add_explanation)
         except asyncio.TimeoutError:
-            content = 'メッセージの補足をキャンセルしました'
+            if dm == BotClient.on_edit_dm[reaction.user_id]:
+                await dm.delete()
         else:
-            embed.insert_field_at(0, name='✏ 補足', value=exp, inline=False)
-            for attachment in attachments:
-                new_attachment_files.append(await attachment.to_file())
-            content = '企画案の補足を追記しました👍'
-            sent_message = await BotClient.good_channel.send(embed=embed, files=new_attachment_files)
-            await sent_message.add_reaction(good)
-            await sent_message.add_reaction(bad)
-            await sent_message.add_reaction(info)
-            await message.delete()
-        await dm.delete()
-        await reaction.member.send(content=content)
+            if message_id == BotClient.on_edit_message[reaction.member.id].id:
+                embed.insert_field_at(0, name='✏ 補足', value=exp, inline=False)
+                for attachment in attachments:
+                    new_attachment_files.append(await attachment.to_file())
+                content = '企画案の補足を追記しました👍'
+
+                try:
+                    await message.delete()
+                    await dm.delete()
+                    sent_message = await BotClient.good_channel.send(embed=embed, files=new_attachment_files)
+                    await sent_message.add_reaction(good)
+                    await sent_message.add_reaction(bad)
+                    await sent_message.add_reaction(info)
+                    BotClient.on_edit_dm.pop(reaction.member.id)
+                    BotClient.on_edit_member.pop(reaction.member.id)
+                    BotClient.on_edit_message.pop(reaction.member.id)
+                except discord.errors.NotFound:
+                    content = '上記の企画案の補足に失敗しました。\n' \
+                              '補足を書いている最中に誰かが企画案を移動させたか、消された可能性があります。\n' \
+                              'もう一度、補足したい企画案に「' + info + '」リアクションを付けて試してください。'
+                await reaction.member.send(content=content)
 
 
 client = BotClient()
