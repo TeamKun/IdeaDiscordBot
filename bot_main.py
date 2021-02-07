@@ -27,6 +27,7 @@ class BotClient(discord.Client):
     on_edit_dm = {}
     on_edit_message = {}
     on_edit_member = {}
+    bumped_message = {}
     use_super = True
 
     async def on_ready(self):
@@ -77,7 +78,6 @@ class BotClient(discord.Client):
         elif channel_id == reaction_channel_id:
             await BotClient.on_reaction_channel(self, reaction)
 
-
     # アイデアチャンネルでいいねが押された時の処理
     async def on_from_channel(self, reaction):
         emoji = reaction.emoji.name
@@ -91,17 +91,17 @@ class BotClient(discord.Client):
         message_url = message.jump_url
 
         async for msg in BotClient.good_channel.history():
-           if not msg.embeds:
-               continue
-           embed = msg.embeds[0]
-           if not embed.fields:
-               continue
-           supporter_field_pos = len(embed.fields) - 1
-           if not supporter_field_pos > 0:
-               continue
-           if message_url in embed.fields[supporter_field_pos].value:
-               await BotClient.send_good(self, msg.id, reaction.member)
-               return
+            if not msg.embeds:
+                continue
+            embed = msg.embeds[0]
+            if not embed.fields:
+                continue
+            supporter_field_pos = len(embed.fields) - 1
+            if not supporter_field_pos > 0:
+                continue
+            if message_url in embed.fields[supporter_field_pos].value:
+                await BotClient.send_good(self, msg.id, reaction.member)
+                return
         date = message.created_at.strftime('%Y/%m/%d')
         attachment_files = []
         for attachment in message.attachments:
@@ -193,6 +193,11 @@ class BotClient(discord.Client):
             await sent_message.add_reaction(good)
             await sent_message.add_reaction(bad)
             await sent_message.add_reaction(info)
+            BotClient.bumped_message[message_id] = sent_message.id
+            keys = [k for k, v in BotClient.on_edit_message.items() if v == message]
+            if len(keys) > 0:
+                for key in keys:
+                    BotClient.on_edit_message[key] = sent_message
             await message.delete()
 
     # いいねのリアクションがいいねチャンネルでされたとき
@@ -271,7 +276,7 @@ class BotClient(discord.Client):
         explanation_wait_time = 1.0 * 60.0 * 10.0
         emoji = reaction.emoji.name
         content = '企画案の補足説明を10分以内に記載して送信してください(画像も添付できます)\n' \
-                   '補足を中止したい場合は「' + bad + '」のリアクションをすると中止されます。'
+                  '補足を中止したい場合は「' + bad + '」のリアクションをすると中止されます。'
         exp = ''
         old_attachment_files = []
         new_attachment_files = []
@@ -321,14 +326,18 @@ class BotClient(discord.Client):
             if dm == BotClient.on_edit_dm[reaction.user_id]:
                 await dm.delete()
         else:
-            if message_id == BotClient.on_edit_message[reaction.member.id].id:
+            if message_id == BotClient.on_edit_message[reaction.member.id].id or\
+               BotClient.bumped_message[message_id] == BotClient.on_edit_message[reaction.member.id].id:
                 embed.insert_field_at(0, name='✏ 補足', value=exp, inline=False)
                 for attachment in attachments:
                     new_attachment_files.append(await attachment.to_file())
                 content = '企画案の補足を追記しました👍'
 
                 try:
-                    await message.delete()
+                    if message_id not in BotClient.bumped_message.keys():
+                        await message.delete()
+                    else:
+                        await BotClient.on_edit_message[reaction.member.id].delete()
                     await dm.delete()
                     sent_message = await BotClient.good_channel.send(embed=embed, files=new_attachment_files)
                     await sent_message.add_reaction(good)
@@ -342,6 +351,8 @@ class BotClient(discord.Client):
                               '補足を書いている最中に誰かが企画案を移動させたか、消された可能性があります。\n' \
                               'もう一度、補足したい企画案に「' + info + '」リアクションを付けて試してください。'
                 await reaction.member.send(content=content)
+        finally:
+            BotClient.bumped_message.pop(message_id)
 
 
 client = BotClient()
