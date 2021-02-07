@@ -91,11 +91,17 @@ class BotClient(discord.Client):
         message_url = message.jump_url
 
         async for msg in BotClient.good_channel.history():
-            embed = msg.embeds[0]
-            supporter_field_pos = len(embed.fields) - 1
-            if message_url in embed.fields[supporter_field_pos].value:
-                await BotClient.send_good(self, msg.id, reaction.member)
-                return
+           if not msg.embeds:
+               continue
+           embed = msg.embeds[0]
+           if not embed.fields:
+               continue
+           supporter_field_pos = len(embed.fields) - 1
+           if not supporter_field_pos > 0:
+               continue
+           if message_url in embed.fields[supporter_field_pos].value:
+               await BotClient.send_good(self, msg.id, reaction.member)
+               return
         date = message.created_at.strftime('%Y/%m/%d')
         attachment_files = []
         for attachment in message.attachments:
