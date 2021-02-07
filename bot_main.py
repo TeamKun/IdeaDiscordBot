@@ -162,6 +162,9 @@ class BotClient(discord.Client):
                                           name=damedaname,
                                           value=damedane,
                                           inline=False)
+                await message.edit(embed=embed)
+                await message.remove_reaction(good, member)
+                return
             else:
                 embed.remove_field(supporter_pos)
                 supporter += '<@' + member_id + '>'
