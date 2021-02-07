@@ -338,6 +338,7 @@ class BotClient(discord.Client):
                         await message.delete()
                     else:
                         await BotClient.on_edit_message[reaction.member.id].delete()
+                        BotClient.bumped_message.pop(message_id)
                     await dm.delete()
                     sent_message = await BotClient.good_channel.send(embed=embed, files=new_attachment_files)
                     await sent_message.add_reaction(good)
@@ -351,8 +352,6 @@ class BotClient(discord.Client):
                               '補足を書いている最中に誰かが企画案を移動させたか、消された可能性があります。\n' \
                               'もう一度、補足したい企画案に「' + info + '」リアクションを付けて試してください。'
                 await reaction.member.send(content=content)
-        finally:
-            BotClient.bumped_message.pop(message_id)
 
 
 client = BotClient()
