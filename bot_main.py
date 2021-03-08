@@ -15,20 +15,27 @@ reaction_channel_id = config.getint('discord', 'to_channel_id')
 super_to_channel_id = config.getint('discord', 'super_to_channel_id')
 super_from_channels_id = config.get('discord', 'super_from_channels_id').replace(' ', '').split(',')
 super_users_id = config.get('discord', 'super_users_id').replace(' ', '').split(',')
+archive_to_channel_id = config.getint('discord', 'archive_to_channel_id')
+archive_from_channels_id = config.get('discord', 'archive_from_channels_id').replace(' ', '').split(',')
+archive_users_id = config.get('discord', 'archive_users_id').replace(' ', '').split(',')
 good = config.get('discord', 'good')
 bad = config.get('discord', 'bad')
 info = config.get('discord', 'info')
+archive = config.get('discord', 'archive')
 
 
 class BotClient(discord.Client):
     good_channel = ''
     super_from_channels = []
     super_to_channel = ''
+    archive_from_channels = []
+    archive_to_channel = ''
     on_edit_dm = {}
     on_edit_message = {}
     on_edit_member = {}
     bumped_message = {}
     use_super = True
+    use_archive = True
 
     async def on_ready(self):
         BotClient.good_channel = BotClient.get_channel(self, reaction_channel_id)
@@ -43,6 +50,11 @@ class BotClient(discord.Client):
             BotClient.super_to_channel = BotClient.get_channel(self, super_to_channel_id)
         else:
             BotClient.use_super = False
+        if not archive_to_channel_id == 0:
+            BotClient.archive_to_channel = BotClient.get_channel(self, archive_to_channel_id)
+        if not archive_from_channels_id[0] == 0:
+            for archive_from in archive_from_channels_id:
+                BotClient.archive_from_channels.append(BotClient.get_channel(self, int(archive_from)))
         print("Botが起動しました")
         BotClient.check_expired_post.start(BotClient)
 
@@ -77,6 +89,9 @@ class BotClient(discord.Client):
             await BotClient.on_from_channel(self, reaction)
         elif channel_id == reaction_channel_id:
             await BotClient.on_reaction_channel(self, reaction)
+        if str(channel_id) in archive_from_channels_id and\
+                str(reaction.member.id) in archive_users_id:
+            await BotClient.on_archive_channel(self, reaction)
 
     # アイデアチャンネルでいいねが押された時の処理
     async def on_from_channel(self, reaction):
@@ -355,6 +370,29 @@ class BotClient(discord.Client):
                               '補足を書いている最中に誰かが企画案を移動させたか、消された可能性があります。\n' \
                               'もう一度、補足したい企画案に「' + info + '」リアクションを付けて試してください。'
                 await reaction.member.send(content=content)
+
+    # 完了チャンネルでアーカイブが押された時の処理
+    async def on_archive_channel(self, reaction):
+        emoji = reaction.emoji.name
+        channel = BotClient.get_channel(self, reaction.channel_id)
+        if emoji != archive:
+            return
+        message_id = reaction.message_id
+        message = await channel.fetch_message(message_id)
+
+        date = message.created_at.strftime('%Y/%m/%d')
+        attachment_files = []
+        for attachment in message.attachments:
+            attachment_files.append(await attachment.to_file())
+
+        embed = discord.Embed(description=message.content,
+                              color=discord.Colour.green())
+        embed.add_field(name='💡 投稿日時',
+                        value='[' + date + ' の投稿]',
+                        inline=False)
+
+        await BotClient.archive_to_channel.send(embed=embed, files=attachment_files)
+        await message.delete()
 
 
 client = BotClient()
