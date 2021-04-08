@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import discord
 from discord.ext import tasks
+import cv2
 
 
 config = configparser.ConfigParser()
@@ -374,6 +375,7 @@ class BotClient(discord.Client):
     # 完了チャンネルでアーカイブが押された時の処理
     async def on_archive_channel(self, reaction):
         emoji = reaction.emoji.name
+        video_formats = [".avi", ".mov", ".mp4", ".mkv", ".wmv", ".mpg", ".flv"]
         channel = BotClient.get_channel(self, reaction.channel_id)
         if emoji != archive:
             return
@@ -383,7 +385,16 @@ class BotClient(discord.Client):
         date = message.created_at.strftime('%Y/%m/%d')
         attachment_files = []
         for attachment in message.attachments:
-            attachment_files.append(await attachment.to_file())
+            file_format = attachment.filename[-4:]
+            if file_format in video_formats:
+                cap = cv2.VideoCapture(attachment.url)
+                cap.set(cv2.CAP_PROP_POS_MSEC, 10)
+                res, img = cap.read()
+                cv2.imwrite('cap.png', img)
+                file = discord.File('./cap.png', 'サムネイル.png')
+                attachment_files.append(file)
+            else:
+                attachment_files.append(await attachment.to_file())
 
         embed = discord.Embed(description=message.content,
                               color=discord.Colour.green())
